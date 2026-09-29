@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Azul do centro do ícone. Só se vê se o foreground não cobrir tudo (cobre). -->
+    <color name="ic_launcher_background">#0C5BD5</color>
+</resources>
