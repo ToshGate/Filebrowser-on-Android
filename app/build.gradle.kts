@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -6,21 +7,55 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Credenciais de assinatura: ficam em keystore.properties (na raiz do projecto), que NUNCA
+// vai para o controlo de versões. Sem esse ficheiro o build release sai sem assinatura.
+// Ver RELEASE.md.
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val hasReleaseKey = keystoreProperties.getProperty("storeFile") != null
+
 android {
-    namespace = "com.example.filebrowser"
-    compileSdk = 35
+    namespace = "com.toshgate.filebrowser"
+    compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.filebrowser"
+        applicationId = providers.gradleProperty("APP_ID").get()
         minSdk = 26
-        targetSdk = 35
-        versionCode = 1
-        versionName = "0.2.0"
+        targetSdk = 36
+        versionCode = providers.gradleProperty("APP_VERSION_CODE").get().toInt()
+        versionName = providers.gradleProperty("APP_VERSION_NAME").get()
+        manifestPlaceholders["appLabel"] = "File Browser"
+    }
+
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: remove código não usado, ofusca e optimiza; depois remove recursos órfãos.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else null
+        }
+        debug {
+            // O debug instala-se ao lado da versão release, com nome diferente no launcher.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            manifestPlaceholders["appLabel"] = "File Browser (debug)"
         }
     }
 
@@ -33,6 +68,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true // BuildConfig.VERSION_NAME no ecrã "Acerca".
     }
 }
 
@@ -54,8 +90,6 @@ dependencies {
 
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-    implementation("androidx.navigation:navigation-compose:2.8.5")
-    implementation("androidx.datastore:datastore-preferences:1.1.2")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
 
     implementation("com.squareup.retrofit2:retrofit:2.11.0")

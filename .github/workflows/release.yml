@@ -1,0 +1,95 @@
+# Publica uma release no GitHub quando é enviada uma tag de versão, por exemplo:
+#   git tag v1.0.0 && git push origin v1.0.0
+#
+# Precisa destes secrets no repositório (Settings → Secrets and variables → Actions):
+#   KEYSTORE_BASE64    o ficheiro .jks codificado em base64
+#   KEYSTORE_PASSWORD  palavra-passe do keystore
+#   KEY_ALIAS          alias da chave
+#   KEY_PASSWORD       palavra-passe da chave
+# Ver RELEASE.md para os criar.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # criar a release e anexar ficheiros
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Confirmar versão e notas da release
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          APP_VERSION=$(grep '^APP_VERSION_NAME=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          if [ "$TAG_VERSION" != "$APP_VERSION" ]; then
+            echo "::error::A tag $GITHUB_REF_NAME não corresponde a APP_VERSION_NAME=$APP_VERSION em gradle.properties."
+            exit 1
+          fi
+          if [ ! -f ".github/release-notes/$GITHUB_REF_NAME.md" ]; then
+            echo "::error::Faltam as notas da release em .github/release-notes/$GITHUB_REF_NAME.md."
+            exit 1
+          fi
+
+      - name: Preparar a chave de assinatura
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Faltam os secrets de assinatura. Ver RELEASE.md."
+            exit 1
+          fi
+          mkdir -p release
+          echo "$KEYSTORE_BASE64" | base64 --decode > release/filebrowser-release.jks
+          printf 'storeFile=release/filebrowser-release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
+
+      - name: Compilar APK e App Bundle
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease bundleRelease
+
+      - name: Preparar ficheiros
+        run: |
+          V="$GITHUB_REF_NAME"
+          mkdir -p dist extra
+          cp app/build/outputs/apk/release/app-release.apk "dist/FileBrowser-$V.apk"
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          cp app/build/outputs/bundle/release/app-release.aab "extra/FileBrowser-$V.aab"
+          cp app/build/outputs/mapping/release/mapping.txt "extra/mapping-$V.txt"
+
+      # O APK e os checksums vão para a release pública.
+      - name: Publicar release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: File Browser ${{ github.ref_name }}
+          body_path: .github/release-notes/${{ github.ref_name }}.md
+          files: dist/*
+
+      # O AAB (para a Play Store) e o mapping.txt (para ler crashes) ficam só como
+      # artefactos privados da execução, não na release pública.
+      - name: Guardar AAB e mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: play-store-${{ github.ref_name }}
+          path: extra/
+          retention-days: 90
+
+      - name: Apagar a chave do runner
+        if: always()
+        run: rm -f release/filebrowser-release.jks keystore.properties

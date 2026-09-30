@@ -1,0 +1,23 @@
+# Gradle / Android Studio
+.gradle/
+build/
+/app/build/
+.idea/
+*.iml
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Específico de cada computador
+local.properties
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Assinatura de release: segredos, nunca no Git
+keystore.properties
+*.jks
+*.keystore
+release/
